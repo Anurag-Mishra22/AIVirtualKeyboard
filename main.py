@@ -1,5 +1,5 @@
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
 import cv2
 import numpy as np
 from cvzone.HandTrackingModule import HandDetector
@@ -116,13 +116,14 @@ class VideoTransformer(VideoTransformerBase):
 # WebRTC Streamlit Integration
 webrtc_streamer(
     key="virtual-keyboard",
-    video_transformer_factory=VideoTransformer,
+    mode=WebRtcMode.SENDRECV,
     media_stream_constraints={"video": True, "audio": False},
+    video_transformer_factory=VideoTransformer
 )
 
+# Sidebar controls for changing background
 st.sidebar.title("Controls")
 if st.sidebar.button("Previous Background"):
     indexImg = max(0, indexImg - 1)
 if st.sidebar.button("Next Background"):
     indexImg = min(len(bg_images) - 1, indexImg + 1)
-
