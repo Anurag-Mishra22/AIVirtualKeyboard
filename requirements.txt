@@ -4,5 +4,3 @@ numpy
 cvzone
 mediapipe
 streamlit-webrtc
-tensorflow==2.18.0
-tflite-runtime
