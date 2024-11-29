@@ -5,3 +5,4 @@ cvzone
 mediapipe
 streamlit-webrtc
 tensorflow
+tflite-runtime
