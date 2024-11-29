@@ -1,150 +1,128 @@
 import streamlit as st
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import cv2
 import numpy as np
 from cvzone.HandTrackingModule import HandDetector
 from cvzone.SelfiSegmentationModule import SelfiSegmentation
-import time
 import os
+import time
 
 # Streamlit settings
 st.set_page_config(page_title="Virtual Keyboard", layout="wide")
 st.title("Interactive Virtual Keyboard")
-st.subheader('''Turn on the webcam and use hand gestures to interact with the virtual keyboard.
-Use 'a' and 'd' from the keyboard to change the background.
-        ''')
+st.subheader(
+    "Turn on the webcam and use hand gestures to interact with the virtual keyboard.\n"
+    "Use 'a' and 'd' to change the background."
+)
 
-# Streamlit camera input widget to capture the webcam feed
-frame = st.camera_input("Take a picture")
-
-if frame:
-    # Convert the Streamlit image to an OpenCV format
-    img = frame.to_image()
-    img = np.array(img)
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)  # Convert from RGB to BGR
-else:
-    st.error("Error: Webcam not detected. Please check the connection or refresh and try again.")
-    st.stop()  # Stop execution if no webcam is detected
-
-# Hand detector
+# Initialize Hand Detector and Segmentor
 detector = HandDetector(maxHands=1, detectionCon=0.8)
 segmentor = SelfiSegmentation()
 
-# Define virtual keyboard layout
-keys = [["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
-        ["A", "S", "D", "F", "G", "H", "J", "K", "L", ";"],
-        ["Z", "X", "C", "V", "B", "N", "M", ",", ".", "/"]]
+# Load background images
+bg_dir = "street"
+if os.path.exists(bg_dir):
+    bg_images = [cv2.imread(os.path.join(bg_dir, img)) for img in os.listdir(bg_dir) if img.endswith(('.jpg', '.png'))]
+else:
+    bg_images = []
 
-# Class to define button properties for virtual keyboard
+if not bg_images:
+    st.error("No background images found. Please add images to the 'street' directory.")
+    st.stop()
+
+indexImg = 0  # Default background index
+keys = [
+    ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+    ["A", "S", "D", "F", "G", "H", "J", "K", "L", ";"],
+    ["Z", "X", "C", "V", "B", "N", "M", ",", ".", "/"],
+]
+
+
+# Virtual keyboard button class
 class Button:
     def __init__(self, pos, text, size=[100, 100]):
-        self.pos = pos  # Position of button
-        self.size = size  # Size of button
-        self.text = text  # Text displayed on button
-        # Draw button text on the keyboard canvas
-        cv2.putText(img, self.text, (self.pos[0] + 20, self.pos[1] + 70),
-                    cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
+        self.pos = pos
+        self.size = size
+        self.text = text
 
-listImg = os.listdir('street') if os.path.exists('street') else []
-if not listImg:
-    st.error("Error: 'street' directory is missing or empty. Please add background images.")
-    st.stop()
-else:
-    imgList = []
-    for imgPath in listImg:
-        image = cv2.imread(f'street/{imgPath}')
-        if image is None:
-            st.error(f"Error: Failed to load image: {imgPath}")
-        else:
-            imgList.append(image)
 
-indexImg = 0
-segmentor = SelfiSegmentation()  # Initialize segmentation model
-prev_key_time = [time.time()] * 2  # Initialize time tracker for key press delay for both hands
+# Create buttons for the keyboard
+buttonList = []
+for i, row in enumerate(keys):
+    for j, key in enumerate(row):
+        buttonList.append(Button([30 + j * 105, 30 + i * 120], key))
 
-pressed_key = None
-output_text = ""
+buttonList.append(Button([1100, 30], "BS", [125, 100]))  # Backspace button
+buttonList.append(Button([300, 370], "SPACE", [500, 100]))  # Space button
 
-# Streamlit layout
-col1, col2 = st.columns([3, 2])
-with col1:
-    run = st.checkbox("Run Webcam", value=True)
-    FRAME_WINDOW = st.image([])  # Display live webcam feed here
-with col2:
-    st.subheader("Output Text")
-    output_text_area = st.subheader("")
+# WebRTC Video Transformer
+class VideoTransformer(VideoTransformerBase):
+    def __init__(self):
+        self.output_text = ""
+        self.prev_key_time = time.time()
 
-while run:
-    if img is None:
-        st.error("Error: Captured image is empty. Check the webcam connection.")
-        st.stop()
-    
-    imgOut = segmentor.removeBG(img, imgList[indexImg])  # it is default in BGR format
-    # Detect hands
-    hands, img = detector.findHands(imgOut, flipType=False)
-    # Create a blank canvas for drawing the keyboard
-    keyboard_canvas = np.zeros_like(img)
-    buttonList = []
+    def transform(self, frame):
+        global indexImg
 
-    # Define buttons in each row of the virtual keyboard
-    for key in keys[0]:
-        buttonList.append(Button([30 + keys[0].index(key) * 105, 30], key))
-    for key in keys[1]:
-        buttonList.append(Button([30 + keys[1].index(key) * 105, 150], key))
-    for key in keys[2]:
-        buttonList.append(Button([30 + keys[2].index(key) * 105, 260], key))
+        # Read and preprocess the video frame
+        img = frame.to_ndarray(format="bgr24")
+        imgOut = segmentor.removeBG(img, bg_images[indexImg], threshold=0.8)
 
-    # Add special buttons for Backspace and Space
-    buttonList.append(Button([90 + 10 * 100, 30], 'BS', size=[125, 100]))
-    buttonList.append(Button([300, 370], 'SPACE', size=[500, 100]))
+        # Detect hands
+        hands, img = detector.findHands(imgOut, flipType=False)
 
-    # Use white color (255, 255, 255) for special buttons
-    cv2.putText(keyboard_canvas, 'BS', (90 + 10 * 100 + 20, 30 + 70),
-                cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
-    cv2.putText(keyboard_canvas, 'SPACE', (300 + 20, 370 + 70),
-                cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
+        # Create a blank canvas for the keyboard
+        keyboard_canvas = np.zeros_like(img)
 
-    # Check if hands are detected
-    for i, hand in enumerate(hands):
-        bbox = hand['bbox']  # Get bounding box for hand
-        hand_width, hand_height = bbox[2], bbox[3]  # Extract hand dimensions
-        lmList = hand["lmList"]  # Get list of landmarks for the hand
+        for button in buttonList:
+            x, y = button.pos
+            w, h = button.size
+            cv2.rectangle(keyboard_canvas, button.pos, (x + w, y + h), (50, 50, 50), -1)
+            cv2.putText(keyboard_canvas, button.text, (x + 20, y + 70), cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
 
-        if lmList:
-            # Calculate the distance between landmarks 6 and 8
-            x4, y4 = lmList[4][0], lmList[4][1]
-            x8, y8 = lmList[8][0], lmList[8][1]
-            distance = np.sqrt((x8 - x4) ** 2 + (y8 - y4) ** 2)
-            cv2.putText(img, f"Distance: {distance}", (50, 700), cv2.FONT_HERSHEY_PLAIN, 2, (255, 255, 255), 2)
-            cv2.putText(img, f"Ratio: {(distance/np.sqrt((hand_width) ** 2 + (hand_height) ** 2))*100}", (50, 650), cv2.FONT_HERSHEY_PLAIN, 2, (255, 255, 255), 2)
-            click_threshold = 10  # Adjust the threshold for click detection
+        # Process hand gestures
+        if hands:
+            for hand in hands:
+                lmList = hand["lmList"]
+                x8, y8 = lmList[8][:2]  # Index fingertip
+                x4, y4 = lmList[4][:2]  # Thumb tip
+                distance = np.linalg.norm([x8 - x4, y8 - y4])
 
-            # Loop through buttons and check if fingertip is over a button
-            for button in buttonList:
-                x, y = button.pos
-                w, h = button.size
+                for button in buttonList:
+                    x, y = button.pos
+                    w, h = button.size
+                    if x < x8 < x + w and y < y8 < y + h:
+                        cv2.rectangle(keyboard_canvas, button.pos, (x + w, y + h), (0, 255, 0), -1)
+                        cv2.putText(keyboard_canvas, button.text, (x + 20, y + 70), cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
 
-                # Check if index finger tip is within the button bounds
-                if x < x8 < x + w and y < y8 < y + h:
-                    # Highlight the button being pointed at by index finger
-                    cv2.rectangle(img, button.pos,
-                                  [button.pos[0] + button.size[0], button.pos[1] + button.size[1]], 
-                                  (0, 255, 160), -1)
-                    cv2.putText(img, button.text, (button.pos[0] + 20, button.pos[1] + 70),
-                                cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
-                    # Check for click gesture
-                    if (distance/np.sqrt((hand_width) ** 2 + (hand_height) ** 2)) * 100 < click_threshold:
-                        if time.time() - prev_key_time[i] > 2:  # Check time delay for key press previously 3.5
-                            prev_key_time[i] = time.time()  # Update the last key press time for that hand
-                            cv2.rectangle(img, button.pos,
-                                          [button.pos[0] + button.size[0], button.pos[1] + button.size[1]], 
-                                          (0, 255, 160), -1)
-                            pressed_key = button.text
-                            if pressed_key == "BS":
-                                output_text = output_text[:-1]  # Handle backspace
-                            elif pressed_key == "SPACE":
-                                output_text += " "  # Handle space
+                        # Simulate a click
+                        if distance < 40 and time.time() - self.prev_key_time > 1.5:
+                            self.prev_key_time = time.time()
+                            if button.text == "BS":
+                                self.output_text = self.output_text[:-1]
+                            elif button.text == "SPACE":
+                                self.output_text += " "
                             else:
-                                output_text += pressed_key  # Add key to output
-    # Update the webcam feed with the image output
-    FRAME_WINDOW.image(img)
-    output_text_area.subheader(output_text)
+                                self.output_text += button.text
+
+        # Overlay the keyboard on the frame
+        img = cv2.addWeighted(img, 0.7, keyboard_canvas, 0.3, 0)
+
+        # Display output text
+        cv2.putText(img, self.output_text, (50, 600), cv2.FONT_HERSHEY_PLAIN, 3, (255, 255, 255), 2)
+        return img
+
+
+# WebRTC Streamlit Integration
+webrtc_streamer(
+    key="virtual-keyboard",
+    video_transformer_factory=VideoTransformer,
+    media_stream_constraints={"video": True, "audio": False},
+)
+
+st.sidebar.title("Controls")
+if st.sidebar.button("Previous Background"):
+    indexImg = max(0, indexImg - 1)
+if st.sidebar.button("Next Background"):
+    indexImg = min(len(bg_images) - 1, indexImg + 1)
+
