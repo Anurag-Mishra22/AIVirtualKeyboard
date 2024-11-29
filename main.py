@@ -10,10 +10,10 @@ import os
 st.set_page_config(page_title="Virtual Keyboard", layout="wide")
 st.title("Interactive Virtual Keyboard")
 st.subheader('''Turn on the webcam and use hand gestures to interact with the virtual keyboard.
-Use 'a' and 'd' from keyboard to change the background.
+Use 'a' and 'd' from the keyboard to change the background.
         ''')
 
-# Use Streamlit's webcam widget instead of OpenCV
+# Streamlit camera input widget to capture the webcam feed
 frame = st.camera_input("Take a picture")
 
 if frame:
@@ -21,7 +21,6 @@ if frame:
     img = frame.to_image()
     img = np.array(img)
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)  # Convert from RGB to BGR
-
 else:
     st.error("Error: Webcam not detected. Please check the connection or refresh and try again.")
     st.stop()  # Stop execution if no webcam is detected
@@ -69,8 +68,7 @@ output_text = ""
 col1, col2 = st.columns([3, 2])
 with col1:
     run = st.checkbox("Run Webcam", value=True)
-    FRAME_WINDOW = st.image([])
-
+    FRAME_WINDOW = st.image([])  # Display live webcam feed here
 with col2:
     st.subheader("Output Text")
     output_text_area = st.subheader("")
@@ -79,6 +77,7 @@ while run:
     if img is None:
         st.error("Error: Captured image is empty. Check the webcam connection.")
         st.stop()
+    
     imgOut = segmentor.removeBG(img, imgList[indexImg])  # it is default in BGR format
     # Detect hands
     hands, img = detector.findHands(imgOut, flipType=False)
@@ -128,7 +127,7 @@ while run:
                 if x < x8 < x + w and y < y8 < y + h:
                     # Highlight the button being pointed at by index finger
                     cv2.rectangle(img, button.pos,
-                                  [button.pos[0] + button.size[0], button.pos[1] + button.size[1]],
+                                  [button.pos[0] + button.size[0], button.pos[1] + button.size[1]], 
                                   (0, 255, 160), -1)
                     cv2.putText(img, button.text, (button.pos[0] + 20, button.pos[1] + 70),
                                 cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
@@ -137,33 +136,15 @@ while run:
                         if time.time() - prev_key_time[i] > 2:  # Check time delay for key press previously 3.5
                             prev_key_time[i] = time.time()  # Update the last key press time for that hand
                             cv2.rectangle(img, button.pos,
-                                          [button.pos[0] + button.size[0], button.pos[1] + button.size[1]],
-                                          (9, 9, 179), -1)
-                            cv2.putText(img, button.text, (button.pos[0] + 20, button.pos[1] + 70),
-                                        cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
-
-                            # Update final text based on button pressed
-                            if button.text != 'BS' and button.text != 'SPACE':
-                                output_text += button.text
-                            elif button.text == 'BS':
-                                output_text = output_text[:-1]
+                                          [button.pos[0] + button.size[0], button.pos[1] + button.size[1]], 
+                                          (0, 255, 160), -1)
+                            pressed_key = button.text
+                            if pressed_key == "BS":
+                                output_text = output_text[:-1]  # Handle backspace
+                            elif pressed_key == "SPACE":
+                                output_text += " "  # Handle space
                             else:
-                                output_text += ' '
-    FRAME_WINDOW.image(img, channels="BGR")
-    if output_text:
-        output_text_area.text(output_text)
-
-    # Keep the window open and update it for each frame; wait for 1 millisecond between frames
-    key = cv2.waitKey(1)
-
-    if key == ord('a'):
-        if indexImg > 0:
-            indexImg -= 1
-    elif key == ord('d'):
-        if indexImg < len(imgList) - 1:
-            indexImg += 1
-    elif key == ord('q'):
-        break
-
-    # Corrected line
-    stacked_img = cv2.addWeighted(img, 0.7, keyboard_canvas, 0.3, 0)
+                                output_text += pressed_key  # Add key to output
+    # Update the webcam feed with the image output
+    FRAME_WINDOW.image(img)
+    output_text_area.subheader(output_text)
