@@ -37,7 +37,7 @@ keys = [["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
 
 # Class to define button properties for virtual keyboard
 class Button:
-    def _init_(self, pos, text, size=[100, 100]):
+    def __init__(self, pos, text, size=[100, 100]):
         self.pos = pos  # Position of button
         self.size = size  # Size of button
         self.text = text  # Text displayed on button
@@ -70,6 +70,7 @@ col1, col2 = st.columns([3, 2])
 with col1:
     run = st.checkbox("Run Webcam", value=True)
     FRAME_WINDOW = st.image([])
+
 with col2:
     st.subheader("Output Text")
     output_text_area = st.subheader("")
@@ -164,4 +165,5 @@ while run:
     elif key == ord('q'):
         break
 
-    stacked_img = cv2.addWeighted(img, 0.7, keyboard_canvas, 0.3, 0)
+    # Corrected line
+    stacked_img = cv2.addWeighted(img, 0.7, keyboard_canvas, 0.3, 0)
