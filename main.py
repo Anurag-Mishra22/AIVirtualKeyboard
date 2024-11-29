@@ -1,108 +1,88 @@
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import cv2
 import numpy as np
-from cvzone.HandTrackingModule import HandDetector
-from cvzone.SelfiSegmentationModule import SelfiSegmentation
-import os
-import time
+import tensorflow as tf
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, VideoTransformerBase
 
-# Streamlit settings
-st.set_page_config(page_title="Virtual Keyboard", layout="wide")
-st.title("Interactive Virtual Keyboard")
-st.subheader(
-    """Turn on the webcam and use hand gestures to interact with the virtual keyboard.
-    Use 'a' and 'd' from keyboard to change the background."""
-)
+# Load TFLite model
+interpreter = tf.lite.Interpreter(model_path="your_model.tflite")
+interpreter.allocate_tensors()
 
-# Virtual Keyboard Keys Layout
-keys = [["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
-        ["A", "S", "D", "F", "G", "H", "J", "K", "L", ";"],
-        ["Z", "X", "C", "V", "B", "N", "M", ",", ".", "/"]]
+# Get model details
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
-# Define Button Class
-class Button:
-    def __init__(self, pos, text, size=[100, 100]):
-        self.pos = pos
-        self.size = size
-        self.text = text
-
-# Load Background Images
-listImg = os.listdir('street')  # Ensure 'street' folder exists with background images
-imgList = [cv2.imread(f'street/{imgPath}') for imgPath in listImg]
-indexImg = 0  # Initial background index
-
-# Define the Streamlit-WebRTC Transformer
-class VirtualKeyboardTransformer(VideoTransformerBase):
+# Define a Video Processor class
+class VirtualKeyboardProcessor(VideoProcessorBase):
     def __init__(self):
-        self.detector = HandDetector(maxHands=1, detectionCon=0.8)
-        self.segmentor = SelfiSegmentation()
-        self.prev_key_time = [time.time()] * 2
-        self.output_text = ""
-        self.indexImg = 0  # Background index
-        self.buttonList = []
-        
-        # Define buttons for virtual keyboard
-        for row_index, row in enumerate(keys):
-            for col_index, key in enumerate(row):
-                self.buttonList.append(Button([30 + col_index * 105, 30 + row_index * 120], key))
-        self.buttonList.append(Button([1050, 30], 'BS', size=[125, 100]))
-        self.buttonList.append(Button([300, 370], 'SPACE', size=[500, 100]))
+        self.font = cv2.FONT_HERSHEY_SIMPLEX
+        self.keyboard = [
+            ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+            ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+            ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L'],
+            ['Z', 'X', 'C', 'V', 'B', 'N', 'M']
+        ]
+        self.rect_color = (0, 255, 0)  # Green rectangle for detected keys
+        self.key_position = {}  # To track key positions on the image
 
-    def transform(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        imgOut = self.segmentor.removeBG(img, imgList[self.indexImg], threshold=0.7)
-        hands, img = self.detector.findHands(imgOut, flipType=False)
-        keyboard_canvas = np.zeros_like(img)
+    def transform(self, frame: np.ndarray) -> np.ndarray:
+        # Object detection using TFLite model
+        input_data = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        input_data = np.expand_dims(input_data, axis=0)
+        input_data = np.array(input_data, dtype=np.uint8)
 
-        # Draw buttons on the virtual keyboard
-        for button in self.buttonList:
-            x, y = button.pos
-            w, h = button.size
-            cv2.rectangle(keyboard_canvas, button.pos, [x + w, y + h], (255, 0, 0), cv2.FILLED)
-            cv2.putText(keyboard_canvas, button.text, (x + 20, y + 70), cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
+        interpreter.set_tensor(input_details[0]['index'], input_data)
+        interpreter.invoke()
 
-        # Hand detection and interaction with buttons
-        if hands:
-            for i, hand in enumerate(hands):
-                lmList = hand["lmList"]
-                if lmList:
-                    x4, y4 = lmList[4][0], lmList[4][1]
-                    x8, y8 = lmList[8][0], lmList[8][1]
-                    distance = np.sqrt((x8 - x4) ** 2 + (y8 - y4) ** 2)
+        # Get the output
+        output_data = interpreter.get_tensor(output_details[0]['index'])
+        output_data = output_data[0]
 
-                    for button in self.buttonList:
-                        x, y = button.pos
-                        w, h = button.size
+        # Here we can add logic to detect which key is pressed based on output_data
+        # This is just a placeholder; adapt it based on your model's output format
+        detected_key = self.detect_key(output_data)
 
-                        # Check if finger is on a button
-                        if x < x8 < x + w and y < y8 < y + h:
-                            cv2.rectangle(img, button.pos, [x + w, y + h], (0, 255, 0), -1)
-                            cv2.putText(img, button.text, (x + 20, y + 70), cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
+        # Draw keys on the virtual keyboard
+        self.draw_virtual_keyboard(frame)
 
-                            # Handle button press when distance is within threshold
-                            if distance < 40:
-                                if time.time() - self.prev_key_time[i] > 2:
-                                    self.prev_key_time[i] = time.time()
-                                    if button.text == "BS":
-                                        self.output_text = self.output_text[:-1]
-                                    elif button.text == "SPACE":
-                                        self.output_text += " "
-                                    else:
-                                        self.output_text += button.text
+        if detected_key:
+            cv2.putText(frame, f"Detected: {detected_key}", (50, 50), self.font, 1, self.rect_color, 2, cv2.LINE_AA)
 
-        # Return the final frame with keyboard overlay and output text
-        cv2.putText(img, self.output_text, (30, 650), cv2.FONT_HERSHEY_PLAIN, 3, (255, 255, 255), 3)
-        return img
+        return frame
 
-# Streamlit WebRTC UI
-webrtc_streamer(key="virtual-keyboard", video_transformer_factory=VirtualKeyboardTransformer)
+    def detect_key(self, output_data):
+        # Placeholder for key detection logic
+        # Based on the output data from the model, map to virtual keys
+        # For example, map the output data to the closest key
+        detected_key = None
+        if output_data is not None:
+            detected_key = 'Q'  # Simulate a detected key for testing
+        return detected_key
 
-# Background change logic for 'a' and 'd' keys
-key = cv2.waitKey(1)
-if key == ord('a'):
-    if indexImg > 0:
-        indexImg -= 1
-elif key == ord('d'):
-    if indexImg < len(imgList) - 1:
-        indexImg += 1
+    def draw_virtual_keyboard(self, frame):
+        key_width = frame.shape[1] // 10
+        key_height = 60
+
+        for i, row in enumerate(self.keyboard):
+            for j, key in enumerate(row):
+                x1 = j * key_width
+                y1 = i * key_height + 100
+                x2 = x1 + key_width
+                y2 = y1 + key_height
+
+                self.key_position[key] = (x1, y1, x2, y2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 2)
+                cv2.putText(frame, key, (x1 + 15, y1 + 35), self.font, 1, (0, 0, 0), 2, cv2.LINE_AA)
+
+# Initialize the video streamer and processor
+def run_virtual_keyboard():
+    webrtc_streamer(
+        key="virtual-keyboard",
+        video_processor_factory=VirtualKeyboardProcessor,
+        video_html_kwargs={"width": 640, "height": 480}
+    )
+
+if __name__ == "__main__":
+    st.title("Virtual Keyboard using Streamlit and WebRTC")
+    st.write("This app demonstrates a virtual keyboard using Streamlit, TFLite model, and WebRTC.")
+    run_virtual_keyboard()
