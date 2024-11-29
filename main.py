@@ -1,7 +1,7 @@
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
-import cv2
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
 import numpy as np
+import cv2
 from cvzone.HandTrackingModule import HandDetector
 from cvzone.SelfiSegmentationModule import SelfiSegmentation
 import os
@@ -10,120 +10,88 @@ import time
 # Streamlit settings
 st.set_page_config(page_title="Virtual Keyboard", layout="wide")
 st.title("Interactive Virtual Keyboard")
-st.subheader(
-    "Turn on the webcam and use hand gestures to interact with the virtual keyboard.\n"
-    "Use 'a' and 'd' to change the background."
-)
 
-# Initialize Hand Detector and Segmentor
+# Initialize hand detector and selfi segmentation
 detector = HandDetector(maxHands=1, detectionCon=0.8)
 segmentor = SelfiSegmentation()
 
+# Define virtual keyboard
+keys = [["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
+        ["A", "S", "D", "F", "G", "H", "J", "K", "L", ";"],
+        ["Z", "X", "C", "V", "B", "N", "M", ",", ".", "/"]]
+
 # Load background images
-bg_dir = "street"
-if os.path.exists(bg_dir):
-    bg_images = [cv2.imread(os.path.join(bg_dir, img)) for img in os.listdir(bg_dir) if img.endswith(('.jpg', '.png'))]
-else:
-    bg_images = []
+listImg = os.listdir('street')
+imgList = [cv2.imread(f'street/{imgPath}') for imgPath in listImg]
+indexImg = 0
 
-if not bg_images:
-    st.error("No background images found. Please add images to the 'street' directory.")
-    st.stop()
+# Shared state for output text
+if "output_text" not in st.session_state:
+    st.session_state["output_text"] = ""
 
-indexImg = 0  # Default background index
-keys = [
-    ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
-    ["A", "S", "D", "F", "G", "H", "J", "K", "L", ";"],
-    ["Z", "X", "C", "V", "B", "N", "M", ",", ".", "/"],
-]
+# Process video frame callback function
+def process_video_frame(frame):
+    img = frame.to_ndarray(format="bgr24")
+    imgOut = segmentor.removeBG(img, imgList[indexImg])  # Remove background
 
+    # Detect hands in the frame
+    hands, img = detector.findHands(imgOut)
 
-# Virtual keyboard button class
-class Button:
-    def __init__(self, pos, text, size=[100, 100]):
-        self.pos = pos
-        self.size = size
-        self.text = text
+    # Create virtual keyboard
+    keyboard_canvas = np.zeros_like(img)
+    buttonList = []
 
+    # Draw buttons
+    for key in keys[0]:
+        buttonList.append(Button([30 + keys[0].index(key) * 105, 30], key))
+    for key in keys[1]:
+        buttonList.append(Button([30 + keys[1].index(key) * 105, 150], key))
+    for key in keys[2]:
+        buttonList.append(Button([30 + keys[2].index(key) * 105, 260], key))
 
-# Create buttons for the keyboard
-buttonList = []
-for i, row in enumerate(keys):
-    for j, key in enumerate(row):
-        buttonList.append(Button([30 + j * 105, 30 + i * 120], key))
+    # Handle hand gestures and key press
+    for hand in hands:
+        bbox = hand['bbox']
+        hand_width, hand_height = bbox[2], bbox[3]
+        lmList = hand["lmList"]
 
-buttonList.append(Button([1100, 30], "BS", [125, 100]))  # Backspace button
-buttonList.append(Button([300, 370], "SPACE", [500, 100]))  # Space button
+        if lmList:
+            x4, y4 = lmList[4][0], lmList[4][1]
+            x8, y8 = lmList[8][0], lmList[8][1]
+            distance = np.sqrt((x8 - x4) ** 2 + (y8 - y4) ** 2)
 
-# WebRTC Video Transformer
-class VideoTransformer(VideoTransformerBase):
-    def __init__(self):
-        self.output_text = ""
-        self.prev_key_time = time.time()
+            click_threshold = 10  # Adjust threshold for click detection
 
-    def transform(self, frame):
-        global indexImg
+            for button in buttonList:
+                x, y = button.pos
+                w, h = button.size
 
-        # Read and preprocess the video frame
-        img = frame.to_ndarray(format="bgr24")
-        imgOut = segmentor.removeBG(img, bg_images[indexImg], threshold=0.8)
-
-        # Detect hands
-        hands, img = detector.findHands(imgOut, flipType=False)
-
-        # Create a blank canvas for the keyboard
-        keyboard_canvas = np.zeros_like(img)
-
-        for button in buttonList:
-            x, y = button.pos
-            w, h = button.size
-            cv2.rectangle(keyboard_canvas, button.pos, (x + w, y + h), (50, 50, 50), -1)
-            cv2.putText(keyboard_canvas, button.text, (x + 20, y + 70), cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
-
-        # Process hand gestures
-        if hands:
-            for hand in hands:
-                lmList = hand["lmList"]
-                x8, y8 = lmList[8][:2]  # Index fingertip
-                x4, y4 = lmList[4][:2]  # Thumb tip
-                distance = np.linalg.norm([x8 - x4, y8 - y4])
-
-                for button in buttonList:
-                    x, y = button.pos
-                    w, h = button.size
-                    if x < x8 < x + w and y < y8 < y + h:
-                        cv2.rectangle(keyboard_canvas, button.pos, (x + w, y + h), (0, 255, 0), -1)
-                        cv2.putText(keyboard_canvas, button.text, (x + 20, y + 70), cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
-
-                        # Simulate a click
-                        if distance < 40 and time.time() - self.prev_key_time > 1.5:
-                            self.prev_key_time = time.time()
-                            if button.text == "BS":
-                                self.output_text = self.output_text[:-1]
-                            elif button.text == "SPACE":
-                                self.output_text += " "
+                if x < x8 < x + w and y < y8 < y + h:
+                    # Button press logic
+                    if (distance/np.sqrt((hand_width) ** 2 + (hand_height) ** 2))*100 < click_threshold:
+                        if time.time() - prev_key_time[i] > 3.5:  # Prevent key spam
+                            prev_key_time[i] = time.time()  # Update the last key press time
+                            # Update final text logic based on button press
+                            if button.text != 'BS' and button.text != 'SPACE':
+                                st.session_state["output_text"] += button.text
+                            elif button.text == 'BS':
+                                st.session_state["output_text"] = st.session_state["output_text"][:-1]
                             else:
-                                self.output_text += button.text
+                                st.session_state["output_text"] += ' '
 
-        # Overlay the keyboard on the frame
-        img = cv2.addWeighted(img, 0.7, keyboard_canvas, 0.3, 0)
+    # Display the typed text on screen
+    cv2.putText(img, st.session_state["output_text"], (120, 580), cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 5)
 
-        # Display output text
-        cv2.putText(img, self.output_text, (50, 600), cv2.FONT_HERSHEY_PLAIN, 3, (255, 255, 255), 2)
-        return img
+    # Combine background video with keyboard display
+    stacked_img = cv2.addWeighted(img, 0.7, keyboard_canvas, 0.3, 0)
 
+    return stacked_img
 
-# WebRTC Streamlit Integration
+# WebRTC streamer for video capture
 webrtc_streamer(
     key="virtual-keyboard",
     mode=WebRtcMode.SENDRECV,
     media_stream_constraints={"video": True, "audio": False},
-    video_transformer_factory=VideoTransformer
+    video_frame_callback=process_video_frame,
 )
 
-# Sidebar controls for changing background
-st.sidebar.title("Controls")
-if st.sidebar.button("Previous Background"):
-    indexImg = max(0, indexImg - 1)
-if st.sidebar.button("Next Background"):
-    indexImg = min(len(bg_images) - 1, indexImg + 1)
