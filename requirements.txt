@@ -1,9 +1,7 @@
 streamlit
-streamlit-webrtc
 opencv-python-headless
 numpy
 cvzone
 mediapipe
-aiohttp
-av
-aiortc
+streamlit_webrtc
+
