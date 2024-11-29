@@ -32,7 +32,6 @@ listImg = os.listdir('street')  # Ensure 'street' folder exists with background 
 imgList = [cv2.imread(f'street/{imgPath}') for imgPath in listImg]
 indexImg = 0  # Initial background index
 
-
 # Define the Streamlit-WebRTC Transformer
 class VirtualKeyboardTransformer(VideoTransformerBase):
     def __init__(self):
@@ -56,12 +55,14 @@ class VirtualKeyboardTransformer(VideoTransformerBase):
         hands, img = self.detector.findHands(imgOut, flipType=False)
         keyboard_canvas = np.zeros_like(img)
 
+        # Draw buttons on the virtual keyboard
         for button in self.buttonList:
             x, y = button.pos
             w, h = button.size
             cv2.rectangle(keyboard_canvas, button.pos, [x + w, y + h], (255, 0, 0), cv2.FILLED)
             cv2.putText(keyboard_canvas, button.text, (x + 20, y + 70), cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
 
+        # Hand detection and interaction with buttons
         if hands:
             for i, hand in enumerate(hands):
                 lmList = hand["lmList"]
@@ -74,9 +75,12 @@ class VirtualKeyboardTransformer(VideoTransformerBase):
                         x, y = button.pos
                         w, h = button.size
 
+                        # Check if finger is on a button
                         if x < x8 < x + w and y < y8 < y + h:
                             cv2.rectangle(img, button.pos, [x + w, y + h], (0, 255, 0), -1)
                             cv2.putText(img, button.text, (x + 20, y + 70), cv2.FONT_HERSHEY_PLAIN, 5, (255, 255, 255), 3)
+
+                            # Handle button press when distance is within threshold
                             if distance < 40:
                                 if time.time() - self.prev_key_time[i] > 2:
                                     self.prev_key_time[i] = time.time()
@@ -87,38 +91,18 @@ class VirtualKeyboardTransformer(VideoTransformerBase):
                                     else:
                                         self.output_text += button.text
 
-        # Merge the image with the keyboard
-        stacked_img = cv2.addWeighted(img, 0.7, keyboard_canvas, 0.3, 0)
-        cv2.putText(stacked_img, self.output_text, (50, 650), cv2.FONT_HERSHEY_PLAIN, 3, (0, 255, 0), 2)
-        return stacked_img
+        # Return the final frame with keyboard overlay and output text
+        cv2.putText(img, self.output_text, (30, 650), cv2.FONT_HERSHEY_PLAIN, 3, (255, 255, 255), 3)
+        return img
 
-    def change_background(self, direction):
-        if direction == "prev" and self.indexImg > 0:
-            self.indexImg -= 1
-        elif direction == "next" and self.indexImg < len(imgList) - 1:
-            self.indexImg += 1
+# Streamlit WebRTC UI
+webrtc_streamer(key="virtual-keyboard", video_transformer_factory=VirtualKeyboardTransformer)
 
-
-# Streamlit Layout
-col1, col2 = st.columns([3, 1])
-
-with col1:
-    st.subheader("Webcam Feed")
-    webrtc_ctx = webrtc_streamer(
-        key="keyboard",
-        video_transformer_factory=VirtualKeyboardTransformer,
-        media_stream_constraints={"video": True, "audio": False},
-    )
-
-with col2:
-    st.subheader("Actions")
-    if st.button("Previous Background"):
-        if webrtc_ctx.video_transformer:
-            webrtc_ctx.video_transformer.change_background("prev")
-    if st.button("Next Background"):
-        if webrtc_ctx.video_transformer:
-            webrtc_ctx.video_transformer.change_background("next")
-
-    st.subheader("Output Text")
-    if webrtc_ctx and webrtc_ctx.video_transformer:
-        st.write(webrtc_ctx.video_transformer.output_text)
+# Background change logic for 'a' and 'd' keys
+key = cv2.waitKey(1)
+if key == ord('a'):
+    if indexImg > 0:
+        indexImg -= 1
+elif key == ord('d'):
+    if indexImg < len(imgList) - 1:
+        indexImg += 1
