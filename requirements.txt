@@ -4,3 +4,4 @@ numpy
 cvzone
 mediapipe
 streamlit-webrtc
+tensorflow
