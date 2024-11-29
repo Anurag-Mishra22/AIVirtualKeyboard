@@ -1,5 +1,5 @@
-streamlit
-opencv-python-headless
-numpy
-cvzone
-mediapipe
+streamlit==1.25.0  # Replace with your Streamlit version
+opencv-python-headless==4.8.0.74  # Headless version for compatibility with Streamlit
+numpy==1.24.3
+cvzone==1.5.6  # Includes HandTrackingModule and SelfiSegmentationModule
+mediapipe==0.10.8  # For hand tracking
