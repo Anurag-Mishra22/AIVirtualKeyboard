@@ -3,5 +3,5 @@ opencv-python-headless
 numpy
 cvzone
 mediapipe
-streamlit_webrtc
+streamlit_webrtc~=0.47.7
 
